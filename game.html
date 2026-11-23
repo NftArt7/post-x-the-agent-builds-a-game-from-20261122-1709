@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mango Catch — built from one prompt</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #0e1a12; height: 100%; overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; font-family: "DejaVu Sans", sans-serif; }
+  #wrap { position: relative; width: 1280px; height: 720px; }
+  canvas { display: block; width: 1280px; height: 720px; border-radius: 18px;
+           background: linear-gradient(#7ec8f7 0%, #bfe8ff 55%, #8fd07a 55%, #5da24a 100%); }
+  #hud { position: absolute; top: 14px; left: 18px; right: 18px; display: flex;
+         justify-content: space-between; color: #12330f; font-weight: bold; font-size: 30px;
+         text-shadow: 0 2px 0 rgba(255,255,255,.6); pointer-events: none; }
+  #banner { position: absolute; left: 0; right: 0; top: 300px; text-align: center;
+            color: #fff; font-size: 64px; font-weight: bold;
+            text-shadow: 0 4px 0 rgba(0,0,0,.35); pointer-events: none; }
+  #sub { position: absolute; left: 0; right: 0; top: 390px; text-align: center;
+         color: #fff; font-size: 28px; text-shadow: 0 2px 0 rgba(0,0,0,.35); pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="1280" height="720"></canvas>
+  <div id="hud"><span id="score">🥭 0</span><span id="time">⏱ 30s</span><span id="miss">❌ 0 / 3</span></div>
+  <div id="banner"></div>
+  <div id="sub"></div>
+</div>
+<script>
+(function () {
+  var cv = document.getElementById('game'), ctx = cv.getContext('2d');
+  var W = 1280, H = 720, GROUND = 640;
+  var params = new URLSearchParams(location.search);
+  var auto = params.get('auto') === '1';
+  var seed = parseInt(params.get('seed') || '7', 10);
+  var rngState = seed >>> 0;
+  function rnd() { rngState = (rngState * 1664525 + 1013904223) >>> 0; return rngState / 4294967296; }
+
+  var basket = { x: W / 2, w: 170, h: 34, speed: 13 };
+  var mangoes = [], score = 0, misses = 0, timeLeft = 30, over = false, started = false;
+  var frame = 0;
+  var keys = {};
+  var banner = document.getElementById('banner'), sub = document.getElementById('sub');
+
+  function spawn() {
+    var kind = rnd();
+    mangoes.push({ x: 60 + rnd() * (W - 120), y: -50, r: 30,
+                   vy: 2.6 + rnd() * 1.8 + score * 0.08,
+                   sway: rnd() * 2 * Math.PI, golden: kind > 0.86 });
+  }
+  function drawMango(m) {
+    ctx.save(); ctx.translate(m.x + Math.sin(m.sway) * 14, m.y);
+    ctx.fillStyle = m.golden ? '#ffd21f' : '#ff9f1c';
+    ctx.beginPath(); ctx.ellipse(0, 0, 30, 36, 0.25, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = m.golden ? '#ffe066' : '#ffb84d';
+    ctx.beginPath(); ctx.ellipse(-9, -8, 12, 16, 0.25, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#3d7a1e'; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(6, -34); ctx.quadraticCurveTo(14, -48, 26, -46); ctx.stroke();
+    ctx.fillStyle = '#4caf50';
+    ctx.beginPath(); ctx.ellipse(28, -44, 16, 8, -0.5, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+  function drawBasket() {
+    var bx = basket.x - basket.w / 2, by = GROUND - basket.h;
+    ctx.fillStyle = '#8b5a2b';
+    ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + basket.w, by);
+    ctx.lineTo(bx + basket.w - 14, by + basket.h); ctx.lineTo(bx + 14, by + basket.h);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#5d3a17'; ctx.lineWidth = 4;
+    for (var i = 1; i < 5; i++) {
+      ctx.beginPath(); ctx.moveTo(bx + i * basket.w / 5, by + 2);
+      ctx.lineTo(bx + i * basket.w / 5 - 6, by + basket.h - 2); ctx.stroke();
+    }
+    ctx.fillStyle = '#a06a35'; ctx.fillRect(bx - 6, by - 8, basket.w + 12, 12);
+  }
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#5da24a'; ctx.fillRect(0, GROUND, W, H - GROUND);
+    ctx.fillStyle = '#4c8a3e';
+    ctx.beginPath(); ctx.arc(150, 690, 40, 0, Math.PI * 2); ctx.arc(1150, 695, 55, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff8d6'; ctx.beginPath(); ctx.arc(1120, 90, 46, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffe98a'; ctx.beginPath(); ctx.arc(1120, 90, 34, 0, Math.PI * 2); ctx.fill();
+    mangoes.forEach(drawMango);
+    drawBasket();
+  }
+  function step() {
+    if (over) { draw(); return; }
+    frame++;
+    if (!started) { started = true; banner.textContent = ''; sub.textContent = ''; }
+    if (auto) {
+      basket.speed = 17;
+      var target = null;
+      mangoes.forEach(function (m) { if (!target || m.y > target.y) target = m; });
+      if (target) {
+        var dx = target.x - basket.x;
+        basket.x += Math.max(-basket.speed, Math.min(basket.speed, dx));
+      }
+    } else {
+      if (keys.ArrowLeft || keys.a) basket.x -= basket.speed;
+      if (keys.ArrowRight || keys.d) basket.x += basket.speed;
+    }
+    basket.x = Math.max(basket.w / 2, Math.min(W - basket.w / 2, basket.x));
+    if (frame % 90 === 0) spawn();
+    if (rnd() < 0.008 + score * 0.0005) spawn();
+    mangoes.forEach(function (m) { m.y += m.vy; m.sway += 0.03; });
+    mangoes = mangoes.filter(function (m) {
+      var caught = m.y > GROUND - basket.h - 8 && m.y < GROUND + 20 &&
+                   Math.abs(m.x - basket.x) < basket.w / 2 + 12;
+      if (caught) { score += m.golden ? 3 : 1; return false; }
+      if (m.y > GROUND + 30) { misses++; return false; }
+      return true;
+    });
+    document.getElementById('score').textContent = '🥭 ' + score;
+    document.getElementById('miss').textContent = '❌ ' + misses + ' / 3';
+    if (misses >= 3) {
+      over = true;
+      banner.textContent = 'GAME OVER';
+      sub.textContent = 'You caught ' + score + ' mangoes — press R to play again';
+    }
+    draw();
+    if (!over) requestAnimationFrame(step);
+  }
+  setInterval(function () {
+    if (over || !started) return;
+    timeLeft -= 1;
+    document.getElementById('time').textContent = '⏱ ' + Math.max(0, timeLeft) + 's';
+    if (timeLeft <= 0) {
+      over = true;
+      banner.textContent = 'TIME UP — ' + score + ' MANGOES!';
+      sub.textContent = 'Built from one prompt. Press R to play again';
+    }
+  }, 1000);
+  addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if ((e.key === 'r' || e.key === 'R') && over) location.reload();
+  });
+  addEventListener('keyup', function (e) { keys[e.key] = false; });
+  cv.addEventListener('mousemove', function (e) {
+    var r = cv.getBoundingClientRect();
+    basket.x = (e.clientX - r.left) * (W / r.width);
+  });
+  banner.textContent = 'MANGO CATCH';
+  sub.textContent = auto ? 'Auto-play demo — the agent is playing' : 'Move with ← → or your mouse — catch the mangoes!';
+  spawn(); spawn();
+  requestAnimationFrame(step);
+})();
+</script>
+</body>
+</html>
